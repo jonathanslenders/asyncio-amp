@@ -4,6 +4,12 @@ from .arguments import String, Integer
 
 __all__ = ('Command', 'AMPProtocol')
 
+class RemoteAmpError(Exception):
+    def __init__(self, error_code, error_description):
+        self.error_code = error_code
+        self.error_description = error_description
+
+
 class Command:
     arguments = []
     response = []
@@ -131,8 +137,10 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
                             reply = {
                                     '_error': id,
                                     '_error_code': String().encode(type(e).__name__),
-                                    '_error_description': String().encode(e.message),
+                                    '_error_description': String().encode(e.args[0]),
                                     }
+                            self._send_packet(reply)
+                        return
                     else:
                         raise
 
@@ -206,5 +214,5 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
                 packet = yield from f
                 return _deserialize_answer(command.__class__, packet)
             except RemoteAmpError as e:
-                if e.code in command.errors:
-                    raise command.errors[e.code] from e
+                if e.error_code in command.errors:
+                    raise command.errors[e.error_code](e.error_description) from e

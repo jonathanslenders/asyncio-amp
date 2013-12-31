@@ -12,6 +12,9 @@ from asyncio_amp import (
     Command,
 )
 
+class MyException(Exception):
+    pass
+
 class EchoCommand(Command):
     arguments = [
             ('text', String()),
@@ -20,6 +23,7 @@ class EchoCommand(Command):
     response = [
             ('text', String()),
     ]
+    errors = { 'MyException': MyException }
 
 
 class ArgumentsTest(unittest.TestCase):
@@ -54,7 +58,6 @@ class RemoteCallTest(unittest.TestCase):
             def echo(self, text, times):
                 return { 'text': text * times }
 
-        # Test client
         def run():
             # Create server and client
             server = yield from self.loop.create_server(ServerProtocol, 'localhost', 8000)
@@ -76,7 +79,6 @@ class RemoteCallTest(unittest.TestCase):
                 yield from asyncio.sleep(.1)
                 return { 'text': text * times }
 
-        # Test client
         def run():
             # Create server and client
             server = yield from self.loop.create_server(ServerProtocol, 'localhost', 8000)
@@ -85,6 +87,28 @@ class RemoteCallTest(unittest.TestCase):
             # Test call
             result = yield from protocol.call_remote(EchoCommand(text='my-text', times=2))
             self.assertEqual(result['text'], 'my-textmy-text')
+
+            # Shut down server.
+            server.close()
+
+        self.loop.run_until_complete(run())
+
+    def test_exception_in_responder(self):
+        class ServerProtocol(AMPProtocol):
+            @EchoCommand.responder
+            def echo(self, text, times):
+                yield from asyncio.sleep(.1)
+                raise MyException('Something went wrong')
+
+        def run():
+            # Create server and client
+            server = yield from self.loop.create_server(ServerProtocol, 'localhost', 8000)
+            transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
+
+            # Test call
+            with self.assertRaises(MyException) as e:
+                yield from protocol.call_remote(EchoCommand(text='my-text', times=2))
+            self.assertEqual(e.exception.args[0], 'Something went wrong')
 
             # Shut down server.
             server.close()
