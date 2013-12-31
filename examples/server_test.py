@@ -3,13 +3,13 @@ import asyncio_amp
 
 if __name__ == '__main__':
     class EchoCommand(asyncio_amp.Command):
-        arguments = {
-            'text': asyncio_amp.String(),
-            'times': asyncio_amp.Integer(),
-        }
-        response = {
-            'text': asyncio_amp.String(),
-        }
+        arguments = [
+            ('text', asyncio_amp.String()),
+            ('times', asyncio_amp.Integer()),
+        ]
+        response = [
+            ('text', asyncio_amp.String()),
+        ]
 
     class MyProtocol(asyncio_amp.AMPProtocol):
         @EchoCommand.responder

@@ -5,12 +5,15 @@ from .arguments import String, Integer
 __all__ = ('Command', 'AMPProtocol')
 
 class Command:
-    arguments = dict()
-    response = dict()
+    arguments = []
+    response = []
+    errors = dict()
 
     def __init__(self, **kwargs):
-        for k, v in self.arguments.items():
-            assert isinstance(kwargs[k], v.type)
+        # Check input data.
+        for k, v in self.arguments:
+            if not isinstance(kwargs[k], v.type):
+                raise TypeError('Expected type %s for argument %s, got %r' % (v.type, k, kwargs[k]))
 
         self._kwargs = kwargs
 
@@ -20,18 +23,17 @@ class Command:
         return methodfunc
 
 
-def serialize_command(command):
-    return { k.encode('ascii'): v.encode(command._kwargs[k]) for k, v in command.arguments.items() if k in command._kwargs }
+def _serialize_command(command):
+    return { k: v.encode(command._kwargs[k]) for k, v in command.arguments if k in command._kwargs }
 
-def deserialize_command(command_cls, packet):
-    return { k.decode('ascii'): command_cls.arguments[k.decode('ascii')].decode(v) for k, v in packet.items() }
+def _deserialize_command(command_cls, packet):
+    return { k: v.decode(packet[k]) for k, v in command_cls.arguments }
 
-def serialize_answer(command_cls, answer_dict):
-    return { k.encode('ascii'): v.encode(answer_dict[k]) for k, v in command_cls.response.items() if k in answer_dict }
+def _serialize_answer(command_cls, answer_dict):
+    return { k: v.encode(answer_dict[k]) for k, v in command_cls.response if k in answer_dict }
 
-def deserialize_answer(command_cls, packet):
-    return { k.decode('ascii'): command_cls.response[k.decode('ascii')].decode(v) for k, v in packet.items() }
-
+def _deserialize_answer(command_cls, packet):
+    return { k: v.decode(packet[k]) for k, v in command_cls.response }
 
 
 class AMPProtocolMeta(type):
@@ -99,7 +101,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
                 packet = { }
             # A SIZE means receiving a name or value.
             elif name is None:
-                name = yield length
+                name = (yield length).decode('ascii')
             else:
                 value = yield length
                 packet[name] = value
@@ -107,37 +109,63 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
     def _handle_incoming_packet(self, packet):
         # Incoming query.
-        if b'_command' in packet:
+        if '_command' in packet:
             @asyncio.coroutine
             def handle_query():
-                command = String().decode(packet.pop(b'_command'))
-                id = packet.pop(b'_ask', None)
+                command = String().decode(packet.pop('_command'))
+                id = packet.pop('_ask', None)
 
                 responder = self.responders[command]
                 command_cls = responder._responds_to_amp_command
 
                 # Decode
-                kwargs = deserialize_command(command_cls, packet)
+                kwargs = _deserialize_command(command_cls, packet)
 
                 # Call responder
-                result = yield from responder(self, ** kwargs)
+                try:
+                    result = yield from responder(self, ** kwargs)
+                except Exception as e:
+                    # When this is an known error, send it back.
+                    if type(e).__name__ in command_cls.errors:
+                        if id is not None:
+                            reply = {
+                                    '_error': id,
+                                    '_error_code': String().encode(type(e).__name__),
+                                    '_error_description': String().encode(e.message),
+                                    }
+                    else:
+                        raise
 
                 # Send answer.
                 if id is not None:
-                    reply = { b'_answer': id }
-                    reply.update(serialize_answer(command_cls, result))
+                    reply = { '_answer': id }
+                    reply.update(_serialize_answer(command_cls, result))
                     self._send_packet(reply)
 
             asyncio.Task(handle_query())
 
         # Incoming answer.
-        elif b'_answer' in packet:
-            id = Integer().decode(packet.pop(b'_answer'))
+        elif '_answer' in packet:
+            id = Integer().decode(packet.pop('_answer'))
             future = self._queries.get(id, None)
             if future is not None:
                 future.set_result(packet)
             else:
                 raise Exception('Received answer to unknown query.')
+
+        # Incoming error
+        elif '_error' in packet:
+            id = Integer().decode(packet.pop('_error'))
+            error_code = String().decode(packet.pop('_error_code'))
+            error_description = String().decode(packet.pop('_error_description'))
+
+            future = self._queries.get(id, None)
+            if future is not None:
+                future.set_exception(RemoteAmpError(error_code, error_description))
+            else:
+                raise Exception('Received answer to unknown query.')
+        else:
+            raise Exception('Received unknown packet.')
 
     def _send_packet(self, packet):
         write = self.transport.write
@@ -147,7 +175,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
             write(value)
 
         for k, v in packet.items():
-            write_value(k)
+            write_value(k.encode('ascii'))
             write_value(v)
 
         write(bytes((0, 0)))
@@ -161,11 +189,11 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         """
         # Send packet
         self._counter += 1
-        packet = serialize_command(command)
+        packet = _serialize_command(command)
 
         if return_answer:
-            packet[b'_ask'] = Integer().encode(self._counter)
-        packet[b'_command'] = String().encode(command.__class__.__name__)
+            packet['_ask'] = Integer().encode(self._counter)
+        packet['_command'] = String().encode(command.__class__.__name__)
 
         self._send_packet(packet)
 
@@ -173,7 +201,10 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         if return_answer:
             f = asyncio.Future()
             self._queries[self._counter] = f
-            packet = yield from f
 
-            return deserialize_answer(command.__class__, packet)
-
+            try:
+                packet = yield from f
+                return _deserialize_answer(command.__class__, packet)
+            except RemoteAmpError as e:
+                if e.code in command.errors:
+                    raise command.errors[e.code] from e

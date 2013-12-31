@@ -46,8 +46,12 @@ class Bytes(Argument):
 class Float(Argument):
     """ Encode floating-point values on the wire as their repr. """
     type = float
-    decode = float
-    encode = repr
+
+    def encode(self, obj):
+        return repr(obj).encode('ascii')
+
+    def decode(self, obj):
+        return float(obj)
 
 
 class Boolean(Argument):
