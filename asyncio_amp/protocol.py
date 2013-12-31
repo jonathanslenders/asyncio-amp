@@ -20,7 +20,7 @@ class Command:
     @classmethod
     def responder(cls, methodfunc):
         methodfunc._responds_to_amp_command = cls
-        return methodfunc
+        return asyncio.coroutine(methodfunc)
 
 
 def _serialize_command(command):
