@@ -18,6 +18,4 @@ if __name__ == '__main__':
         print(result)
 
     loop = asyncio.get_event_loop()
-    s = loop.run_until_complete(run())
-    #print (s.sockets[0].getsockname())
-    #loop.run_forever()
+    loop.run_until_complete(run())

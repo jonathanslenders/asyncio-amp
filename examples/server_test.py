@@ -19,7 +19,6 @@ if __name__ == '__main__':
             return { 'text': ('You said:' + text) * times }
 
     loop = asyncio.get_event_loop()
-    f = loop.create_server(MyProtocol, 'localhost', 8000)
-    s = loop.run_until_complete(f)
-    print (s.sockets[0].getsockname())
+    server = loop.run_until_complete(loop.create_server(MyProtocol, 'localhost', 8000))
+    print(server.sockets[0].getsockname())
     loop.run_forever()
