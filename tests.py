@@ -64,7 +64,7 @@ class RemoteCallTest(unittest.TestCase):
             transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
 
             # Test call
-            result = yield from protocol.call_remote(EchoCommand(text='my-text', times=2))
+            result = yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
             self.assertEqual(result['text'], 'my-textmy-text')
 
             # Shut down server.
@@ -85,7 +85,7 @@ class RemoteCallTest(unittest.TestCase):
             transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
 
             # Test call
-            result = yield from protocol.call_remote(EchoCommand(text='my-text', times=2))
+            result = yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
             self.assertEqual(result['text'], 'my-textmy-text')
 
             # Shut down server.
@@ -107,7 +107,7 @@ class RemoteCallTest(unittest.TestCase):
 
             # Test call
             with self.assertRaises(MyException) as e:
-                yield from protocol.call_remote(EchoCommand(text='my-text', times=2))
+                yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
             self.assertEqual(e.exception.args[0], 'Something went wrong')
 
             # Shut down server.

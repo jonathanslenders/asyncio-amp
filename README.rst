@@ -99,7 +99,7 @@ and then uses the ``call_remote`` coroutine to do the actual call.
                                             asyncio_amp.AMPProtocol, 'localhost', 8000)
 
         # Call remote command.
-        result = yield from protocol.call_remote(EchoCommand(text='Hello world', times=4))
+        result = yield from protocol.call_remote(EchoCommand, text='Hello world', times=4))
         print(result)
 
     loop = asyncio.get_event_loop()

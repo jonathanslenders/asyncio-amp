@@ -15,22 +15,14 @@ class Command:
     response = []
     errors = dict()
 
-    def __init__(self, **kwargs):
-        # Check input data.
-        for k, v in self.arguments:
-            if not isinstance(kwargs[k], v.type):
-                raise TypeError('Expected type %s for argument %s, got %r' % (v.type, k, kwargs[k]))
-
-        self._kwargs = kwargs
-
     @classmethod
     def responder(cls, methodfunc):
         methodfunc._responds_to_amp_command = cls
         return asyncio.coroutine(methodfunc)
 
 
-def _serialize_command(command):
-    return { k: v.encode(command._kwargs[k]) for k, v in command.arguments if k in command._kwargs }
+def _serialize_command(command, kwargs):
+    return { k: v.encode(kwargs[k]) for k, v in command.arguments if k in kwargs }
 
 def _deserialize_command(command_cls, packet):
     return { k: v.decode(packet[k]) for k, v in command_cls.arguments }
@@ -189,7 +181,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         write(bytes((0, 0)))
 
     @asyncio.coroutine
-    def call_remote(self, command, return_answer=True):
+    def call_remote(self, command, **kwargs):
         """
         ::
 
@@ -197,22 +189,20 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         """
         # Send packet
         self._counter += 1
-        packet = _serialize_command(command)
+        packet = _serialize_command(command, kwargs)
 
-        if return_answer:
-            packet['_ask'] = Integer().encode(self._counter)
-        packet['_command'] = String().encode(command.__class__.__name__)
+        packet['_ask'] = Integer().encode(self._counter)
+        packet['_command'] = String().encode(command.__name__)
 
         self._send_packet(packet)
 
         # Receive packet from remote end.
-        if return_answer:
-            f = asyncio.Future()
-            self._queries[self._counter] = f
+        f = asyncio.Future()
+        self._queries[self._counter] = f
 
-            try:
-                packet = yield from f
-                return _deserialize_answer(command.__class__, packet)
-            except RemoteAmpError as e:
-                if e.error_code in command.errors:
-                    raise command.errors[e.error_code](e.error_description) from e
+        try:
+            packet = yield from f
+            return _deserialize_answer(command, packet)
+        except RemoteAmpError as e:
+            if e.error_code in command.errors:
+                raise command.errors[e.error_code](e.error_description) from e

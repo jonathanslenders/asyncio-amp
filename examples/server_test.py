@@ -15,7 +15,7 @@ if __name__ == '__main__':
         @EchoCommand.responder
         def echo(self, text, times):
             yield from asyncio.sleep(1)
-    #        yield from self.call_remote(Hello())
+    #        yield from self.call_remote(Hello)
             return { 'text': ('You said:' + text) * times }
 
     loop = asyncio.get_event_loop()
