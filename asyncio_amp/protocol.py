@@ -1,4 +1,5 @@
 import asyncio
+from struct import pack, unpack
 
 from .arguments import String, Integer
 
@@ -33,6 +34,10 @@ class UnhandledCommandError(RemoteAmpError):
         error_code = UNHANDLED_ERROR_CODE
         RemoteAmpError.__init__(self, error_code, description)
 
+class TooLongError(RemoteAmpError):
+    def __init__(self):
+        pass
+
 
 class Command:
     arguments = []
@@ -56,6 +61,13 @@ def _serialize_answer(command_cls, answer_dict):
 
 def _deserialize_answer(command_cls, packet):
     return { k: v.decode(packet[k]) for k, v in command_cls.response }
+
+
+# The longest key allowed
+MAX_KEY_LENGTH = 0xff
+
+# The longest value allowed
+MAX_VALUE_LENGTH = 0xffff
 
 
 class AMPProtocolMeta(type):
@@ -110,14 +122,10 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         name = None
 
         while True:
-            # First, receive NULL byte
-            b = yield 1
-            assert b == b'\0'
+            # First, receive the SIZE or double NULL.
+            length = unpack('!H', (yield 2))[0]
 
-            # Next receive either SIZE or another NULL.
-            length = (yield 1)[0]
-
-            # Another NULL means the end of a packet
+            # NULL (two NULL bytes) means the end of a packet
             if length == 0:
                 self._handle_incoming_packet(packet)
                 packet = { }
@@ -160,13 +168,25 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
     def _send_packet(self, packet):
         write = self.transport.write
 
-        def write_value(value):
-            write(bytes((0, len(value))))
-            write(value)
-
         for k, v in packet.items():
-            write_value(k.encode('ascii'))
-            write_value(v)
+            k = k.encode('ascii')
+
+            key_length = len(k)
+            value_length = len(v)
+
+            if key_length > MAX_KEY_LENGTH:
+                raise TooLongError()
+
+            if value_length > MAX_VALUE_LENGTH:
+                raise TooLongError()
+
+            # Write key
+            write(pack("!H", key_length))
+            write(k)
+
+            # Write value
+            write(pack("!H", value_length))
+            write(v)
 
         write(bytes((0, 0)))
 
