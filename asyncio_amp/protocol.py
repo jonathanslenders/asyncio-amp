@@ -4,11 +4,40 @@ from .arguments import String, Integer
 
 __all__ = ('Command', 'AMPProtocol')
 
-class RemoteAmpError(Exception):
+MAX_KEY_LENGTH = 0xff
+
+
+class AmpError(Exception):
+    """
+    Base class of all Amp-related exceptions.
+    """
+
+class RemoteAmpError(AmpError):
     def __init__(self, error_code, error_description):
         self.error_code = error_code
         self.error_description = error_description
 
+class TooLong(AmpError):
+    """
+    @is_local: Was the string encoded locally, or received too long from
+               the network?
+    @value:    The string that was too long.
+    @key_name: If the string being encoded was in a value position, what
+               key was it being encoded for?
+    """
+
+    def __init__(self, is_local, value, key_name=None):
+        AmpError.__init__(self)
+        self.is_local = is_local
+        self.value = value
+        self.key_name = key_name
+
+    def __str__(self):
+        hdr = self.key_name.decode('utf-8')
+        lcl = self.is_local and "local" or "remote"
+        return "{0} key *{1}* is too long: {2}".format(lcl, 
+                                                       hdr, 
+                                                       len(self.value))
 
 class Command:
     arguments = []
@@ -177,14 +206,21 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
     def _send_packet(self, packet):
         write = self.transport.write
-
-        def write_value(value):
-            write(bytes((0, len(value))))
-            write(value)
-
+        
+        def write_value(key, value):
+            key_l = len(key)
+            value_l = len(value)
+            try:
+                write(bytes((0, key_l)))
+                write(key)
+                write(bytes((0, value_l)))
+                write(value)
+            except ValueError as ex:
+                if value_l > MAX_KEY_LENGTH or key_l > MAX_KEY_LENGTH:
+                    raise TooLong(True, value, key) from ex
+                
         for k, v in packet.items():
-            write_value(k.encode('ascii'))
-            write_value(v)
+            write_value(key=k.encode('ascii'), value=v)
 
         write(bytes((0, 0)))
 
