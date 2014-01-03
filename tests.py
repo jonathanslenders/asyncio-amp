@@ -10,6 +10,10 @@ from asyncio_amp import (
     AMPProtocol,
 
     Command,
+
+    RemoteAmpError,
+    UnknownRemoteError,
+    UnhandledCommandError,
 )
 
 class MyException(Exception):
@@ -115,6 +119,49 @@ class RemoteCallTest(unittest.TestCase):
 
         self.loop.run_until_complete(run())
 
+    def test_unknown_exception_in_responder(self):
+        class UnknownMyException(Exception):
+            pass
+
+        class ServerProtocol(AMPProtocol):
+            @EchoCommand.responder
+            def echo(self, text, times):
+                yield from asyncio.sleep(.1)
+                raise UnknownMyException('Something unknown went wrong')
+
+        def run():
+            # Create server and client
+            server = yield from self.loop.create_server(ServerProtocol, 'localhost', 8000)
+            transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
+
+            # Test call
+            with self.assertRaises(UnknownRemoteError) as e:
+                yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
+            self.assertEqual(e.exception.args[0], 'Something unknown went wrong')
+
+            # Shut down server.
+            server.close()
+
+        self.loop.run_until_complete(run())
+
+    def test_no_responder_found(self):
+        class ServerProtocol(AMPProtocol):
+            pass
+
+        def run():
+            # Create server and client
+            server = yield from self.loop.create_server(ServerProtocol, 'localhost', 8000)
+            transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
+
+            # Test call
+            with self.assertRaises(UnhandledCommandError) as e:
+                yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
+            self.assertEqual(e.exception.args[0], "Unhandled Command: 'EchoCommand'")
+
+            # Shut down server.
+            server.close()
+
+        self.loop.run_until_complete(run())
 
 if __name__ == '__main__':
     unittest.main()

@@ -2,12 +2,36 @@ import asyncio
 
 from .arguments import String, Integer
 
-__all__ = ('Command', 'AMPProtocol')
+__all__ = ('Command', 'AMPProtocol', 'RemoteAmpError', 'UnknownRemoteError', 'UnhandledCommandError', )
+
+
+UNKNOWN_ERROR_CODE = 'UNKNOWN'
+UNHANDLED_ERROR_CODE = 'UNHANDLED'
 
 class RemoteAmpError(Exception):
     def __init__(self, error_code, error_description):
         self.error_code = error_code
         self.error_description = error_description
+
+
+
+class UnknownRemoteError(RemoteAmpError):
+    """
+    This means that an error whose type we can't identify was raised from the
+    other side.
+    """
+    def __init__(self, description):
+        error_code = UNKNOWN_ERROR_CODE
+        RemoteAmpError.__init__(self, error_code, description)
+
+
+class UnhandledCommandError(RemoteAmpError):
+    """
+    A command received via amp could not be dispatched.
+    """
+    def __init__(self, description):
+        error_code = UNHANDLED_ERROR_CODE
+        RemoteAmpError.__init__(self, error_code, description)
 
 
 class Command:
@@ -108,41 +132,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
     def _handle_incoming_packet(self, packet):
         # Incoming query.
         if '_command' in packet:
-            @asyncio.coroutine
-            def handle_query():
-                command = String().decode(packet.pop('_command'))
-                id = packet.pop('_ask', None)
-
-                responder = self.responders[command]
-                command_cls = responder._responds_to_amp_command
-
-                # Decode
-                kwargs = _deserialize_command(command_cls, packet)
-
-                # Call responder
-                try:
-                    result = yield from responder(self, ** kwargs)
-                except Exception as e:
-                    # When this is an known error, send it back.
-                    if type(e).__name__ in command_cls.errors:
-                        if id is not None:
-                            reply = {
-                                    '_error': id,
-                                    '_error_code': String().encode(type(e).__name__),
-                                    '_error_description': String().encode(e.args[0]),
-                                    }
-                            self._send_packet(reply)
-                        return
-                    else:
-                        raise
-
-                # Send answer.
-                if id is not None:
-                    reply = { '_answer': id }
-                    reply.update(_serialize_answer(command_cls, result))
-                    self._send_packet(reply)
-
-            asyncio.Task(handle_query())
+            asyncio.Task(self._handle_command_packet(packet))
 
         # Incoming answer.
         elif '_answer' in packet:
@@ -181,6 +171,45 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         write(bytes((0, 0)))
 
     @asyncio.coroutine
+    def _handle_command_packet(self, packet):
+        command = String().decode(packet.pop('_command'))
+        id = packet.pop('_ask', None)
+
+        def send_error_reply(error_code, description):
+            self._send_packet({
+                    '_error': id,
+                    '_error_code': String().encode(error_code),
+                    '_error_description': String().encode(description),
+                    })
+
+        # Get responder
+        if command in self.responders:
+            responder = self.responders[command]
+        else:
+            send_error_reply(UNHANDLED_ERROR_CODE, 'Unhandled Command: %r' % command)
+            return
+
+        # Decode
+        command_cls = responder._responds_to_amp_command
+        kwargs = _deserialize_command(command_cls, packet)
+
+        # Call responder
+        try:
+            result = yield from responder(self, ** kwargs)
+        except Exception as e:
+            if id is not None:
+                # Send error to client
+                error_code = (type(e).__name__ if type(e).__name__ in command_cls.errors else UNKNOWN_ERROR_CODE)
+                send_error_reply(error_code, e.args[0])
+            return
+
+        # Send answer.
+        if id is not None:
+            reply = { '_answer': id }
+            reply.update(_serialize_answer(command_cls, result))
+            self._send_packet(reply)
+
+    @asyncio.coroutine
     def call_remote(self, command, **kwargs):
         """
         ::
@@ -204,5 +233,11 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
             packet = yield from f
             return _deserialize_answer(command, packet)
         except RemoteAmpError as e:
-            if e.error_code in command.errors:
+            if e.error_code == UNKNOWN_ERROR_CODE:
+                raise UnknownRemoteError(e.error_description)
+
+            if e.error_code == UNHANDLED_ERROR_CODE:
+                raise UnhandledCommandError(e.error_description)
+
+            elif e.error_code in command.errors:
                 raise command.errors[e.error_code](e.error_description) from e
