@@ -144,7 +144,14 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
             raise Exception('Received unknown packet.')
 
     def _send_packet(self, packet):
-        write = self.transport.write
+        # Write to transport.
+        self.transport.write(self._encode_packet(packet))
+
+    @classmethod
+    def _encode_packet(cls, packet):
+        """ Encode dict to network bytes. """
+        data_buffer = []
+        write = data_buffer.append
 
         for k, v in packet.items():
             k = k.encode('ascii')
@@ -166,7 +173,8 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
             write(pack("!H", value_length))
             write(v)
 
-        write(bytes((0, 0)))
+        data_buffer.append(bytes((0, 0)))
+        return b''.join(data_buffer)
 
     @asyncio.coroutine
     def _handle_command_packet(self, packet):
