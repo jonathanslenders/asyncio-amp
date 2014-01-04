@@ -1,4 +1,5 @@
 __all__ = (
+	'ConnectionLostError',
 	'RemoteAmpError',
 	'TooLongError',
 	'UnhandledCommandError',
@@ -7,6 +8,12 @@ __all__ = (
 
 class AmpError(Exception):
 	pass
+
+
+class ConnectionLostError(Exception):
+	""" Connection Lost. """
+	def __init__(self, exc):
+		self.exception = exc
 
 
 class RemoteAmpError(AmpError):

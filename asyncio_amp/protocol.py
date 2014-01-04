@@ -3,13 +3,14 @@ from struct import pack, unpack
 
 from .arguments import String, Integer
 from .exceptions import (
-	RemoteAmpError,
-	TooLongError,
-	UnhandledCommandError,
-	UnknownRemoteError,
+    ConnectionLostError,
+    RemoteAmpError,
+    TooLongError,
+    UnhandledCommandError,
+    UnknownRemoteError,
 
-	UNHANDLED_ERROR_CODE,
-	UNKNOWN_ERROR_CODE,
+    UNHANDLED_ERROR_CODE,
+    UNKNOWN_ERROR_CODE,
 )
 
 __all__ = ('Command', 'AMPProtocol', )
@@ -170,7 +171,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
     @asyncio.coroutine
     def _handle_command_packet(self, packet):
         command = String().decode(packet.pop('_command'))
-        id = packet.pop('_ask', None)
+        id = packet.pop('_ask', None) # If '_ask' is missing, we shouldn't return an answer.
 
         def send_error_reply(error_code, description):
             self._send_packet({
@@ -238,3 +239,5 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
             elif e.error_code in command.errors:
                 raise command.errors[e.error_code](e.error_description) from e
+            else:
+                raise
