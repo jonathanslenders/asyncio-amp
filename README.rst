@@ -1,6 +1,8 @@
 asyncio-amp
 ===========
 
+|Build Status|
+
 AMP client and server library for asyncio.
 
 
@@ -123,5 +125,10 @@ Limitations of the protocol
 ---------------------------
 
 The AMP protocol is designed to pass many small messages. The length of a field
-is actually encoded in a single byte, and therefore each of the arguments
-should not exceed the 255 bytes limit when encoded.
+is actually encoded in a single byte and the length of a value in two bytes.
+Therefore field names should never exceed 255 bytes and values should not
+exceed 65535 bytes when encoded.
+
+
+.. |Build Status| image:: https://travis-ci.org/jonathanslenders/asyncio-amp.png
+    :target: https://travis-ci.org/jonathanslenders/asyncio-amp#
