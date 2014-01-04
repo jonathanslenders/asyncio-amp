@@ -12,6 +12,7 @@ from asyncio_amp import (
     Command,
 
     RemoteAmpError,
+    TooLongError,
     UnknownRemoteError,
     UnhandledCommandError,
 )
@@ -81,7 +82,12 @@ class RemoteCallTest(unittest.TestCase):
         class ServerProtocol(AMPProtocol):
             @EchoCommand.responder
             def echo(self, text, times):
-                return { 'text': 'x' * 0xffff }
+                if times == 1:
+                    # Still allowed
+                    return { 'text': 'x' * 0xffff }
+                else:
+                    # Should raise too long
+                    return { 'text': 'x' * 0x1ffff }
 
         def run():
             # Create server and client
@@ -89,8 +95,17 @@ class RemoteCallTest(unittest.TestCase):
             transport, protocol =  yield from self.loop.create_connection(AMPProtocol, 'localhost', 8000)
 
             # Test call
-            result = yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
+            result = yield from protocol.call_remote(EchoCommand, text='my-text', times=1)
             self.assertEqual(result['text'], 'x' * 0xffff)
+
+            # Test a too big call. (locally)
+            with self.assertRaises(TooLongError):
+                result = yield from protocol.call_remote(EchoCommand, text='x' * 0x1ffff, times=1)
+
+            # Test a too big call. (on the remote end.)
+ 			# (This comes back as UnknownRemoteError)
+            with self.assertRaises(UnknownRemoteError):
+                result = yield from protocol.call_remote(EchoCommand, text='my-text', times=2)
 
             # Shut down server.
             server.close()

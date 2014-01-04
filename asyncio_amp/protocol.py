@@ -194,18 +194,22 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
         # Call responder
         try:
             result = yield from responder(self, ** kwargs)
+
+            # Send answer.
+            if id is not None:
+                # (This can still raise TooLongError if the response is too long.)
+                reply = { '_answer': id }
+                reply.update(_serialize_answer(command_cls, result))
+                self._send_packet(reply)
+        except TooLongError as e:
+            if id is not None:
+                send_error_reply(UNKNOWN_ERROR_CODE, 'Response too long')
+            #raise
         except Exception as e:
             if id is not None:
                 # Send error to client
                 error_code = (type(e).__name__ if type(e).__name__ in command_cls.errors else UNKNOWN_ERROR_CODE)
                 send_error_reply(error_code, e.args[0])
-            return
-
-        # Send answer.
-        if id is not None:
-            reply = { '_answer': id }
-            reply.update(_serialize_answer(command_cls, result))
-            self._send_packet(reply)
 
     @asyncio.coroutine
     def call_remote(self, command, **kwargs):
