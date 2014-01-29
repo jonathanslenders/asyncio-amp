@@ -125,6 +125,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
             id = Integer().decode(packet.pop('_answer'))
             future = self._queries.get(id, None)
             if future is not None:
+                del self._queries[id] # XXX: add unit test which fails if we delete this line.
                 future.set_result(packet)
             else:
                 raise Exception('Received answer to unknown query.')
@@ -137,6 +138,7 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
             future = self._queries.get(id, None)
             if future is not None:
+                del self._queries[id] # add unit test which fails if we delete this line.
                 future.set_exception(RemoteAmpError(error_code, error_description))
             else:
                 raise Exception('Received answer to unknown query.')
@@ -145,7 +147,10 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
     def _send_packet(self, packet):
         # Write to transport.
-        self.transport.write(self._encode_packet(packet))
+        if self.transport:
+            self.transport.write(self._encode_packet(packet))
+        else:
+            raise Exception('Not connected')# TODO: Add better exception and unittest.
 
     @classmethod
     def _encode_packet(cls, packet):
