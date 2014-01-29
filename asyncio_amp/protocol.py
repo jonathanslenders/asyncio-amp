@@ -231,12 +231,13 @@ class AMPProtocol(asyncio.Protocol, metaclass=AMPProtocolMeta):
 
             yield from protocol.call_remote(EchoCommand, message='text')
         """
-        # Send packet
-        self._counter += 1
+        # Create packet
         packet = _serialize_command(command, kwargs)
-
-        packet['_ask'] = Integer().encode(self._counter)
         packet['_command'] = String().encode(command.__name__)
+
+        # If we want to wait for an answer, add _ask and counter.
+        self._counter += 1
+        packet['_ask'] = Integer().encode(self._counter)
 
         self._send_packet(packet)
 
